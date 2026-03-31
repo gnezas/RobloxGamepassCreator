@@ -1,0 +1,685 @@
+// Roblox Gamepass Creator - Content Script
+// Refactored for Specific Errors, Stable Log Scrolling, and Improved Navbar Styling
+
+(function() {
+  if (window.robloxGamepassCreatorLoaded) return;
+  window.robloxGamepassCreatorLoaded = true;
+
+  const DEFAULT_VALUES = [2, 5, 10, 15, 25, 50, 75, 100, 150, 200, 250, 350, 500, 750, 1000, 2500, 3500, 5000, 7500, 10000];
+  
+  let state = {
+    userId: null,
+    username: null,
+    displayName: null,
+    csrfToken: null,
+    isCreating: false,
+    currentAction: null,
+    progress: 0,
+    total: 0,
+    results: [],
+    logs: [],
+    isOpen: false,
+    targetUniverse: null,
+    currentBatch: [],
+    presets: [...DEFAULT_VALUES],
+    maxRetries: 2
+  };
+
+  let shadowRoot;
+  let host;
+  let elements = {};
+  let isDragging = false;
+  let dragOffset = { x: 0, y: 0 };
+
+  const ICONS = {
+    plus: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>',
+    bolt: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"></polygon></svg>',
+    settings: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2.02 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path></svg>',
+    trash: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg>',
+    check: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg>',
+    x: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>',
+    chevronLeft: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 18 9 12 15 6"></polyline></svg>',
+    coffee: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 8h1a4 4 0 0 1 0 8h-1"></path><path d="M2 8h16v9a4 4 0 0 1-4 4H6a4 4 0 0 1-4-4V8z"></path><line x1="6" y1="1" x2="6" y2="4"></line><line x1="10" y1="1" x2="10" y2="4"></line><line x1="14" y1="1" x2="14" y2="4"></line></svg>'
+  };
+
+  async function init() {
+    extractUserData();
+    await loadState();
+    createUI();
+    injectNavbarButton();
+    if (state.isCreating) resumeAction();
+    updateUI();
+  }
+
+  function extractUserData() {
+    const userDataMeta = document.querySelector('meta[name="user-data"]');
+    if (userDataMeta) {
+      state.userId = userDataMeta.getAttribute('data-userid');
+      state.username = userDataMeta.getAttribute('data-name');
+      state.displayName = userDataMeta.getAttribute('data-displayname');
+    }
+    const csrfMeta = document.querySelector('meta[name="csrf-token"]');
+    if (csrfMeta) state.csrfToken = csrfMeta.getAttribute('data-token');
+  }
+
+  async function loadState() {
+    return new Promise((resolve) => {
+      chrome.storage.local.get(['gamepassCreatorState'], (result) => {
+        if (result.gamepassCreatorState) {
+          const saved = result.gamepassCreatorState;
+          state = { ...state, ...saved, isOpen: false };
+          if (!state.presets || state.presets.length === 0) {
+            state.presets = [...DEFAULT_VALUES];
+          }
+        }
+        resolve();
+      });
+    });
+  }
+
+  async function saveState() {
+    return new Promise((resolve) => {
+      chrome.storage.local.set({ gamepassCreatorState: state }, resolve);
+    });
+  }
+
+  function injectNavbarButton() {
+    if (!state.userId) return;
+    if (document.getElementById('rbx-gamepass-creator-nav-item')) return;
+
+    const navbarRight = document.querySelector('.nav.navbar-right.rbx-navbar-icon-group');
+    if (!navbarRight) return;
+
+    const navItem = document.createElement('li');
+    navItem.id = 'rbx-gamepass-creator-nav-item';
+    navItem.className = 'navbar-icon-item';
+    navItem.innerHTML = `
+      <button type="button" class="rbx-menu-item" style="background:rgba(255,255,255,0.08); color:#fff; border-radius:6px; padding:0 12px; height:28px; margin:6px 4px 6px 4px; border:1px solid rgba(255,255,255,0.1); font-weight:600; font-size:12px; cursor:pointer; font-family:inherit; transition: 0.2s; display: flex; align-items: center; justify-content: center;">
+        Create Passes
+      </button>
+    `;
+
+    const robuxItem = document.getElementById('navbar-robux');
+    if (robuxItem) {
+      navbarRight.insertBefore(navItem, robuxItem);
+    } else {
+      navbarRight.appendChild(navItem);
+    }
+
+    const btn = navItem.querySelector('button');
+    btn.addEventListener('mouseenter', () => btn.style.background = 'rgba(255,255,255,0.12)');
+    btn.addEventListener('mouseleave', () => btn.style.background = 'rgba(255,255,255,0.08)');
+    btn.addEventListener('click', toggleWidget);
+  }
+
+  function createUI() {
+    host = document.createElement('div');
+    host.id = 'roblox-gamepass-creator-host';
+    document.body.appendChild(host);
+    shadowRoot = host.attachShadow({ mode: 'open' });
+
+    const style = document.createElement('style');
+    style.textContent = `
+      :host {
+        --bg: rgba(13, 13, 13, 0.9);
+        --bg-elevated: rgba(255, 255, 255, 0.04);
+        --bg-hover: rgba(255, 255, 255, 0.08);
+        --border: rgba(255, 255, 255, 0.08);
+        --border-strong: rgba(255, 255, 255, 0.15);
+        --text: #ffffff;
+        --text-dim: #888888;
+        --accent: #ffffff;
+        --radius: 12px;
+        --blur: 24px;
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+        z-index: 9999999;
+        position: fixed;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+        pointer-events: none;
+      }
+
+      .widget {
+        position: fixed;
+        top: 50%;
+        left: 50%;
+        width: 360px;
+        background: var(--bg);
+        backdrop-filter: blur(var(--blur));
+        border-radius: 16px;
+        border: 1px solid var(--border);
+        box-shadow: 0 30px 60px rgba(0, 0, 0, 0.7);
+        overflow: hidden;
+        display: flex;
+        flex-direction: column;
+        transition: opacity 0.3s cubic-bezier(0.16, 1, 0.3, 1), transform 0.4s cubic-bezier(0.16, 1, 0.3, 1);
+        opacity: 0;
+        transform: translate(-50%, -48%) scale(0.98);
+        pointer-events: none;
+        color: var(--text);
+      }
+
+      .widget.open { opacity: 1; transform: translate(-50%, -50%) scale(1); pointer-events: all; }
+
+      .header { 
+        padding: 14px 20px; 
+        display: flex; 
+        justify-content: space-between; 
+        align-items: center; 
+        cursor: grab;
+        border-bottom: 1px solid var(--border);
+        background: rgba(255,255,255,0.02);
+      }
+      .header:active { cursor: grabbing; }
+      .header h2 { margin: 0; font-size: 11px; font-weight: 700; letter-spacing: 0.05em; color: var(--text-dim); text-transform: uppercase; }
+
+      .header-actions { display: flex; gap: 6px; }
+      .icon-btn {
+        background: transparent;
+        border: none;
+        color: var(--text-dim);
+        width: 28px;
+        height: 28px;
+        border-radius: 6px;
+        cursor: pointer;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        transition: 0.15s;
+      }
+      .icon-btn:hover { background: var(--bg-hover); color: var(--text); }
+      .icon-btn svg { width: 15px; height: 15px; }
+
+      .content { padding: 20px; flex: 1; }
+      .section { display: flex; flex-direction: column; gap: 12px; }
+      .hidden { display: none !important; }
+
+      .actions { display: flex; flex-direction: column; gap: 8px; }
+
+      .btn {
+        height: 38px;
+        padding: 0 14px;
+        border-radius: 8px;
+        border: 1px solid var(--border);
+        font-weight: 600;
+        cursor: pointer;
+        transition: all 0.15s;
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        font-size: 13px;
+        width: 100%;
+        background: var(--bg-elevated);
+        color: var(--text);
+        font-family: inherit;
+        justify-content: flex-start;
+      }
+      .btn:hover { background: var(--bg-hover); border-color: var(--border-strong); }
+      .btn:disabled { opacity: 0.4; cursor: not-allowed; }
+      .btn svg { width: 14px; height: 14px; opacity: 0.7; }
+      
+      .btn-primary { background: #fff; color: #000; border: none; justify-content: center; }
+      .btn-primary:hover { background: #eeeeee; }
+
+      .input-group { display: flex; flex-direction: column; gap: 8px; margin-top: 4px; border-top: 1px solid var(--border); padding-top: 12px; }
+      input, textarea {
+        width: 100%;
+        padding: 10px 12px;
+        border-radius: 8px;
+        border: 1px solid var(--border);
+        background: rgba(0,0,0,0.2);
+        color: white;
+        box-sizing: border-box;
+        font-family: inherit;
+        font-size: 13px;
+        transition: 0.15s;
+      }
+      textarea { min-height: 80px; resize: none; font-size: 12px; line-height: 1.5; color: var(--text-dim); }
+      input:focus, textarea:focus { outline: none; border-color: var(--border-strong); background: rgba(0,0,0,0.3); }
+
+      .progress-container { text-align: center; }
+      .progress-bar { height: 3px; background: rgba(255,255,255,0.06); border-radius: 2px; overflow: hidden; margin: 16px 0 8px; }
+      .progress-fill { height: 100%; background: #fff; width: 0%; transition: width 0.3s ease; }
+      .stats { display: flex; justify-content: space-between; font-size: 10px; font-weight: 700; color: var(--text-dim); text-transform: uppercase; }
+
+      .log {
+        background: rgba(0,0,0,0.2);
+        border-radius: 8px;
+        padding: 12px;
+        height: 160px;
+        overflow-y: auto;
+        font-size: 11px;
+        border: 1px solid var(--border);
+        margin-top: 16px;
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+      }
+      .log-entry { display: flex; gap: 8px; color: var(--text-dim); line-height: 1.4; text-align: left; }
+      .log-success { color: var(--text); }
+      .log-error { color: #ff5555; }
+      .log-entry svg { width: 12px; height: 12px; flex-shrink: 0; margin-top: 2px; }
+
+      .results-list { margin: 16px 0; border-radius: 8px; border: 1px solid var(--border); height: 200px; overflow-y: auto; background: rgba(0,0,0,0.1); }
+      .result-item { display: flex; flex-direction: column; gap: 2px; padding: 10px 14px; border-bottom: 1px solid var(--border); font-size: 12px; text-align: left; }
+      .result-item:last-child { border-bottom: none; }
+      .result-row { display: flex; justify-content: space-between; font-weight: 500; }
+      .result-error-detail { font-size: 10px; color: #ff5555; opacity: 0.8; }
+
+      .overlay { position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.6); backdrop-filter: blur(8px); display: flex; align-items: center; justify-content: center; z-index: 2000; opacity: 0; pointer-events: none; transition: 0.3s; }
+      .overlay.active { opacity: 1; pointer-events: all; }
+      .confirm-modal { background: var(--bg); border: 1px solid var(--border); padding: 28px; border-radius: 16px; max-width: 300px; text-align: center; }
+      .confirm-modal h3 { margin: 0 0 8px; font-size: 16px; }
+      .confirm-modal p { color: var(--text-dim); font-size: 13px; margin: 0 0 24px; line-height: 1.5; }
+      
+      ::-webkit-scrollbar { width: 4px; }
+      ::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.1); border-radius: 2px; }
+    `;
+    shadowRoot.appendChild(style);
+
+    container = document.createElement('div');
+    container.innerHTML = `
+      <div class="widget" id="widget">
+        <div class="header" id="widget-header">
+          <div style="display:flex; align-items:center; gap:8px">
+            <button class="icon-btn hidden" id="btn-back">${ICONS.chevronLeft}</button>
+            <h2 id="header-label">Gamepass Creator</h2>
+          </div>
+          <div class="header-actions">
+            <a href="https://buymeacoffee.com/andrewzeng" target="_blank" class="icon-btn" title="Donate">${ICONS.coffee}</a>
+            <button class="icon-btn" id="btn-settings-toggle">${ICONS.settings}</button>
+            <button class="icon-btn" id="btn-close">${ICONS.x}</button>
+          </div>
+        </div>
+        
+        <div class="content">
+          <div id="section-main" class="section">
+            <div class="actions">
+              <button id="btn-quick" class="btn">${ICONS.bolt} Create from presets</button>
+              <button id="btn-custom-toggle" class="btn">${ICONS.plus} Custom amount</button>
+              
+              <div id="custom-input-group" class="input-group hidden">
+                <input type="number" id="input-amount" placeholder="Amount (e.g. 100)">
+                <button id="btn-create-custom" class="btn btn-primary">Start creation</button>
+              </div>
+
+              <button id="btn-remove-all" class="btn" style="margin-top:4px; color:#ff5555; border-color:rgba(255,85,85,0.15)">${ICONS.trash} Wipe all passes</button>
+            </div>
+          </div>
+
+          <div id="section-settings" class="section hidden">
+            <div style="display:flex; flex-direction:column; gap:4px">
+              <span style="font-size:10px; font-weight:700; color:var(--text-dim); text-transform:uppercase">Pass presets</span>
+              <textarea id="settings-presets" placeholder="2, 5, 10, 25..."></textarea>
+            </div>
+            <button id="btn-save-settings" class="btn btn-primary">Save changes</button>
+          </div>
+
+          <div id="section-progress" class="section hidden">
+            <div class="progress-container">
+              <div class="progress-bar"><div class="progress-fill" id="progress-fill"></div></div>
+              <div class="stats">
+                <span id="progress-text">0 / 0 items</span>
+                <span id="progress-percent">0%</span>
+              </div>
+              <div id="status-log" class="log"></div>
+            </div>
+          </div>
+
+          <div id="section-results" class="section hidden">
+            <div id="results-list" class="results-list"></div>
+            <button id="btn-done" class="btn btn-primary">${ICONS.check} Finish batch</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="overlay" id="confirm-overlay">
+        <div class="confirm-modal">
+          <h3>Are you sure?</h3>
+          <p>This will take all gamepasses in this experience off-sale. This action cannot be reversed.</p>
+          <div style="display:flex; gap:10px">
+            <button class="btn" id="confirm-cancel" style="flex:1; justify-content:center">Cancel</button>
+            <button class="btn" id="confirm-yes" style="flex:1; justify-content:center; color:#ff5555; border-color:rgba(255,85,85,0.3)">Wipe all</button>
+          </div>
+        </div>
+      </div>
+    `;
+    shadowRoot.appendChild(container);
+
+    elements = {
+      widget: shadowRoot.getElementById('widget'),
+      header: shadowRoot.getElementById('widget-header'),
+      btnClose: shadowRoot.getElementById('btn-close'),
+      btnBack: shadowRoot.getElementById('btn-back'),
+      headerLabel: shadowRoot.getElementById('header-label'),
+      btnSettingsToggle: shadowRoot.getElementById('btn-settings-toggle'),
+      sectionMain: shadowRoot.getElementById('section-main'),
+      sectionSettings: shadowRoot.getElementById('section-settings'),
+      sectionProgress: shadowRoot.getElementById('section-progress'),
+      sectionResults: shadowRoot.getElementById('section-results'),
+      btnQuick: shadowRoot.getElementById('btn-quick'),
+      btnCustomToggle: shadowRoot.getElementById('btn-custom-toggle'),
+      customInputGroup: shadowRoot.getElementById('custom-input-group'),
+      inputAmount: shadowRoot.getElementById('input-amount'),
+      btnCreateCustom: shadowRoot.getElementById('btn-create-custom'),
+      btnRemoveAll: shadowRoot.getElementById('btn-remove-all'),
+      settingsPresets: shadowRoot.getElementById('settings-presets'),
+      btnSaveSettings: shadowRoot.getElementById('btn-save-settings'),
+      progressFill: shadowRoot.getElementById('progress-fill'),
+      progressText: shadowRoot.getElementById('progress-text'),
+      progressPercent: shadowRoot.getElementById('progress-percent'),
+      statusLog: shadowRoot.getElementById('status-log'),
+      resultsList: shadowRoot.getElementById('results-list'),
+      btnDone: shadowRoot.getElementById('btn-done'),
+      confirmOverlay: shadowRoot.getElementById('confirm-overlay'),
+      confirmCancel: shadowRoot.getElementById('confirm-cancel'),
+      confirmYes: shadowRoot.getElementById('confirm-yes')
+    };
+
+    elements.btnClose.addEventListener('click', toggleWidget);
+    elements.btnBack.addEventListener('click', () => showSection('main'));
+    elements.btnSettingsToggle.addEventListener('click', () => {
+      elements.settingsPresets.value = state.presets.join(', ');
+      showSection('settings');
+    });
+    elements.btnSaveSettings.addEventListener('click', async () => {
+      const parsed = elements.settingsPresets.value.split(',').map(s => parseInt(s.trim())).filter(n => !isNaN(n) && n > 0);
+      if (parsed.length > 0) {
+        state.presets = parsed;
+        await saveState();
+        showSection('main');
+      }
+    });
+    elements.btnQuick.addEventListener('click', () => startAction('create', state.presets));
+    elements.btnCustomToggle.addEventListener('click', () => elements.customInputGroup.classList.toggle('hidden'));
+    elements.btnCreateCustom.addEventListener('click', () => {
+      const val = parseInt(elements.inputAmount.value);
+      if (val > 0) startAction('create', [val]);
+    });
+    elements.btnRemoveAll.addEventListener('click', () => elements.confirmOverlay.classList.add('active'));
+    elements.confirmCancel.addEventListener('click', () => elements.confirmOverlay.classList.remove('active'));
+    elements.confirmYes.addEventListener('click', () => {
+      elements.confirmOverlay.classList.remove('active');
+      startAction('remove');
+    });
+    elements.btnDone.addEventListener('click', () => {
+      state.isCreating = false;
+      state.results = [];
+      state.logs = [];
+      saveState();
+      showSection('main');
+    });
+
+    // Draggable logic
+    elements.header.addEventListener('mousedown', (e) => {
+      if (e.target.closest('.icon-btn')) return;
+      isDragging = true;
+      const rect = elements.widget.getBoundingClientRect();
+      dragOffset.x = e.clientX - rect.left;
+      dragOffset.y = e.clientY - rect.top;
+      elements.widget.style.transition = 'none';
+    });
+    document.addEventListener('mousemove', (e) => {
+      if (!isDragging) return;
+      elements.widget.style.left = `${e.clientX - dragOffset.x}px`;
+      elements.widget.style.top = `${e.clientY - dragOffset.y}px`;
+      elements.widget.style.transform = 'none';
+    });
+    document.addEventListener('mouseup', () => {
+      if (isDragging) {
+        isDragging = false;
+        elements.widget.style.transition = 'opacity 0.3s cubic-bezier(0.16, 1, 0.3, 1), transform 0.4s cubic-bezier(0.16, 1, 0.3, 1)';
+      }
+    });
+  }
+
+  function toggleWidget() {
+    state.isOpen = !state.isOpen;
+    if (state.isOpen) {
+      elements.widget.style.left = '50%';
+      elements.widget.style.top = '50%';
+      elements.widget.style.transform = 'translate(-50%, -50%) scale(1)';
+      elements.widget.classList.add('open');
+    } else {
+      elements.widget.classList.remove('open');
+    }
+  }
+
+  function showSection(name) {
+    elements.sectionMain.classList.add('hidden');
+    elements.sectionSettings.classList.add('hidden');
+    elements.sectionProgress.classList.add('hidden');
+    elements.sectionResults.classList.add('hidden');
+    elements.btnBack.classList.add('hidden');
+    elements.headerLabel.textContent = 'Gamepass Creator';
+    if (name === 'settings') {
+      elements.btnBack.classList.remove('hidden');
+      elements.headerLabel.textContent = 'Settings';
+    }
+    shadowRoot.getElementById(`section-${name}`).classList.remove('hidden');
+  }
+
+  function updateUI() {
+    if (state.isCreating) {
+      showSection('progress');
+      const progress = state.total > 0 ? (state.progress / state.total) * 100 : 0;
+      elements.progressFill.style.width = `${progress}%`;
+      elements.progressText.textContent = `${state.progress} / ${state.total} items`;
+      elements.progressPercent.textContent = `${Math.round(progress)}%`;
+      renderLogs();
+    } else if (state.results.length > 0) {
+      showSection('results');
+      elements.resultsList.innerHTML = state.results.map(r => `
+        <div class="result-item">
+          <div class="result-row">
+            <span>${r.name}</span>
+            <span style="color:${r.success ? '#fff' : '#ff5555'}; display:flex; align-items:center; gap:4px">
+              ${r.success ? ICONS.check : ICONS.x} ${r.success ? 'Success' : 'Failed'}
+            </span>
+          </div>
+          ${!r.success && r.error ? `<div class="result-error-detail">${r.error}</div>` : ''}
+        </div>
+      `).join('');
+    } else {
+      showSection('main');
+    }
+  }
+
+  function addLog(msg, type = 'info') {
+    state.logs.push({ msg, type });
+    if (state.logs.length > 50) state.logs.shift();
+    renderLogs();
+    saveState();
+  }
+
+  function renderLogs() {
+    elements.statusLog.innerHTML = state.logs.map(log => {
+      let icon = '';
+      if (log.type === 'success') icon = ICONS.check;
+      if (log.type === 'error') icon = ICONS.x;
+      return `<div class="log-entry log-${log.type}">${icon} <span>${log.msg}</span></div>`;
+    }).join('');
+    elements.statusLog.scrollTop = elements.statusLog.scrollHeight;
+  }
+
+  async function getRobloxErrorMessage(response) {
+    try {
+      const data = await response.clone().json();
+      if (data.errorMessage) return data.errorMessage;
+      if (data.errors && data.errors.length > 0) return data.errors[0].message;
+      if (data.message) return data.message;
+    } catch (e) {}
+    return `Status ${response.status}`;
+  }
+
+  async function robloxFetch(url, options = {}) {
+    if (!options.headers) options.headers = {};
+    if (state.csrfToken) options.headers['x-csrf-token'] = state.csrfToken;
+    options.credentials = 'include';
+    let response = await fetch(url, options);
+    if (response.status === 403) {
+      const newToken = response.headers.get('x-csrf-token');
+      if (newToken) {
+        state.csrfToken = newToken;
+        options.headers['x-csrf-token'] = state.csrfToken;
+        response = await fetch(url, options);
+      }
+    }
+    return response;
+  }
+
+  async function startAction(action, data = []) {
+    state.isCreating = true;
+    state.currentAction = action;
+    state.currentBatch = data;
+    state.progress = 0;
+    state.total = data.length;
+    state.results = [];
+    state.logs = [];
+    showSection('progress');
+    updateUI();
+    addLog('Process started', 'success');
+    await saveState();
+    runActionLoop();
+  }
+
+  async function resumeAction() {
+    addLog('Session restored', 'success');
+    runActionLoop();
+  }
+
+  async function runActionLoop() {
+    try {
+      if (!state.targetUniverse) {
+        addLog('Connecting to API...', 'info');
+        const gamesResp = await robloxFetch(`https://games.roblox.com/v2/users/${state.userId}/games?sortOrder=Asc&limit=10`);
+        if (!gamesResp.ok) throw new Error(await getRobloxErrorMessage(gamesResp));
+        const games = await gamesResp.json();
+        if (!games.data || games.data.length === 0) throw new Error('No games found');
+        const game = games.data[0];
+        const univResp = await robloxFetch(`https://apis.roblox.com/universes/v1/places/${game.rootPlace.id}/universe`);
+        if (!univResp.ok) throw new Error(await getRobloxErrorMessage(univResp));
+        const univData = await univResp.json();
+        state.targetUniverse = univData.universeId;
+        addLog(`Linked to: ${game.name}`, 'success');
+        await saveState();
+      }
+      if (state.currentAction === 'create') await createLoop();
+      else await removeLoop();
+    } catch (err) {
+      addLog(err.message, 'error');
+      state.isCreating = false;
+      saveState();
+      updateUI();
+    }
+  }
+
+  async function performWithRetry(task, label) {
+    let lastError;
+    for (let attempt = 0; attempt <= state.maxRetries; attempt++) {
+      try {
+        if (attempt > 0) addLog(`Retrying ${label}...`, 'info');
+        return await task();
+      } catch (err) {
+        lastError = err;
+        if (attempt < state.maxRetries) await new Promise(r => setTimeout(r, 800));
+      }
+    }
+    throw lastError;
+  }
+
+  async function createLoop() {
+    const items = [...state.currentBatch];
+    for (let i = state.progress; i < items.length; i++) {
+      const amount = items[i];
+      try {
+        const passId = await performWithRetry(async () => {
+          const form = new FormData();
+          form.append('name', amount.toString());
+          form.append('universeId', state.targetUniverse.toString());
+          const resp = await robloxFetch('https://apis.roblox.com/game-passes/v1/game-passes', { method: 'POST', body: form });
+          if (!resp.ok) throw new Error(await getRobloxErrorMessage(resp));
+          const data = await resp.json();
+          return data.gamePassId;
+        }, `${amount} R$ creation`);
+
+        await performWithRetry(async () => {
+          const saleForm = new FormData();
+          saleForm.append('isForSale', 'true');
+          saleForm.append('price', amount.toString());
+          const resp = await robloxFetch(`https://apis.roblox.com/game-passes/v1/game-passes/${passId}/details`, { method: 'POST', body: saleForm });
+          if (!resp.ok) {
+            const errorMsg = await getRobloxErrorMessage(resp);
+            if (errorMsg.includes('on-sale limit')) {
+              const limitErr = new Error('LIMIT_REACHED');
+              limitErr.detail = 'You have reached the maximum limit of 50 active gamepasses. Please remove some existing passes before creating more.';
+              throw limitErr;
+            }
+            throw new Error(errorMsg);
+          }
+        }, `${amount} R$ listing`);
+
+        state.results.push({ name: `${amount} R$`, success: true });
+        addLog(`Created ${amount} R$`, 'success');
+      } catch (err) {
+        if (err.message === 'LIMIT_REACHED') {
+          addLog('CRITICAL: Gamepass limit reached (50/50). Stopping task.', 'error');
+          addLog('Tip: Use "Wipe all passes" to clear space.', 'info');
+          state.results.push({ name: `${amount} R$`, success: false, error: 'Roblox limit reached (50 passes)' });
+          break; // Stop the entire loop
+        }
+        addLog(`${amount} R$ failed: ${err.message}`, 'error');
+        state.results.push({ name: `${amount} R$`, success: false, error: err.message });
+      }
+      state.progress = i + 1;
+      await saveState();
+      updateUI();
+      await new Promise(r => setTimeout(r, 400));
+    }
+    state.isCreating = false;
+    await saveState();
+    updateUI();
+  }
+
+  async function removeLoop() {
+    addLog('Scanning experience...', 'info');
+    const resp = await robloxFetch(`https://apis.roblox.com/game-passes/v1/universes/${state.targetUniverse}/game-passes?passView=Full&pageSize=100`);
+    if (!resp.ok) throw new Error(await getRobloxErrorMessage(resp));
+    const data = await resp.json();
+    const onsale = (data.gamePasses || []).filter(p => p.isForSale);
+    state.total = onsale.length;
+    state.progress = 0;
+    if (onsale.length === 0) addLog('No on-sale passes found', 'success');
+    for (let i = 0; i < onsale.length; i++) {
+      const pass = onsale[i];
+      try {
+        await performWithRetry(async () => {
+          const form = new FormData();
+          form.append('isForSale', 'false');
+          const resp = await robloxFetch(`https://apis.roblox.com/game-passes/v1/game-passes/${pass.id}/details`, { method: 'POST', body: form });
+          if (!resp.ok) throw new Error(await getRobloxErrorMessage(resp));
+        }, `removal of ${pass.displayName}`);
+        state.results.push({ name: pass.displayName, success: true });
+        addLog(`Removed: ${pass.displayName}`, 'success');
+      } catch (err) {
+        addLog(`Wipe failed: ${pass.displayName} - ${err.message}`, 'error');
+        state.results.push({ name: pass.displayName, success: false, error: err.message });
+      }
+      state.progress = i + 1;
+      await saveState();
+      updateUI();
+      await new Promise(r => setTimeout(r, 200));
+    }
+    state.isCreating = false;
+    await saveState();
+    updateUI();
+  }
+
+  init();
+  const observer = new MutationObserver(() => {
+    if (!document.getElementById('rbx-gamepass-creator-nav-item')) injectNavbarButton();
+  });
+  observer.observe(document.body, { childList: true, subtree: true });
+})();
