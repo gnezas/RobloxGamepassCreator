@@ -83,7 +83,6 @@ Automates the mandatory experience questionnaire by fetching the latest requirem
 │   └── content.js         # Main logic and UI injection
 ├── icons/                 # Extension icons (16, 32, 48, 128)
 ├── manifest.json          # Extension configuration (MV3)
-├── questionnaire-requests-example.txt # Questionnaire example
 └── README.md              # Documentation
 ```
 
