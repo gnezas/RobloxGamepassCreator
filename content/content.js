@@ -1,6 +1,3 @@
-// Roblox Gamepass Creator - Content Script
-// Refactored for Specific Errors, Stable Log Scrolling, and Improved Navbar Styling
-
 (function() {
   if (window.robloxGamepassCreatorLoaded) return;
   window.robloxGamepassCreatorLoaded = true;
@@ -549,7 +546,6 @@
       showSection('main');
     });
 
-    // Draggable logic
     elements.header.addEventListener('mousedown', (e) => {
       if (e.target.closest('.icon-btn')) return;
       isDragging = true;
