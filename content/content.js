@@ -19,8 +19,10 @@
     currentSection: 'main',
     targetUniverse: null,
     currentBatch: [],
+    currentOptions: {},
     currentPassId: null,
     presets: [...DEFAULT_VALUES],
+    isRegionalPricingEnabled: false,
     maxRetries: 2
   };
 
@@ -395,6 +397,65 @@
       .footer { margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--border); text-align: center; font-size: 11px; color: var(--text-dim); }
       .footer a { color: var(--text-dim); text-decoration: none; font-weight: 500; transition: color 0.2s; }
       .footer a:hover { color: var(--text); }
+
+      .toggle-group {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-top: 4px;
+        padding: 4px 0;
+      }
+      .toggle-label {
+        font-size: 11px;
+        font-weight: 700;
+        color: var(--text-dim);
+        text-transform: uppercase;
+        display: flex;
+        align-items: center;
+        gap: 6px;
+      }
+      .switch {
+        position: relative;
+        display: inline-block;
+        width: 32px;
+        height: 18px;
+      }
+      .switch input {
+        opacity: 0;
+        width: 0;
+        height: 0;
+      }
+      .slider {
+        position: absolute;
+        cursor: pointer;
+        top: 0;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        background-color: var(--bg-elevated);
+        transition: .2s;
+        border-radius: 18px;
+        border: 1px solid var(--border);
+      }
+      .slider:before {
+        position: absolute;
+        content: "";
+        height: 12px;
+        width: 12px;
+        left: 2px;
+        bottom: 2px;
+        background-color: var(--text-dim);
+        transition: .2s;
+        border-radius: 50%;
+      }
+      input:checked + .slider {
+        background-color: var(--text);
+        border-color: var(--text);
+      }
+      input:checked + .slider:before {
+        transform: translateX(14px);
+        background-color: var(--bg);
+      }
     `;
     shadowRoot.appendChild(style);
 
@@ -421,6 +482,13 @@
               
               <div id="custom-input-group" class="input-group hidden">
                 <input type="number" id="input-amount" placeholder="Amount (e.g. 100)">
+                <div class="toggle-group" style="margin-bottom: 8px;">
+                  <span class="toggle-label">Enable Regional Pricing</span>
+                  <label class="switch">
+                    <input type="checkbox" id="custom-regional">
+                    <span class="slider"></span>
+                  </label>
+                </div>
                 <button id="btn-create-custom" class="btn btn-primary">Start creation</button>
               </div>
 
@@ -444,6 +512,15 @@
               </div>
               <textarea id="settings-presets" placeholder="2, 5, 10, 25..."></textarea>
             </div>
+
+            <div class="toggle-group">
+              <span class="toggle-label">Regional Pricing (Default)</span>
+              <label class="switch">
+                <input type="checkbox" id="settings-regional">
+                <span class="slider"></span>
+              </label>
+            </div>
+
             <button id="btn-save-settings" class="btn btn-primary">Save changes</button>
             <div style="margin-top:12px; font-size:10px; color:var(--text-dim); text-align:center">
               Version ${chrome.runtime.getManifest().version}
@@ -501,9 +578,11 @@
       customInputGroup: shadowRoot.getElementById('custom-input-group'),
       inputAmount: shadowRoot.getElementById('input-amount'),
       btnCreateCustom: shadowRoot.getElementById('btn-create-custom'),
+      inputCustomRegional: shadowRoot.getElementById('custom-regional'),
       btnQuestionnaire: shadowRoot.getElementById('btn-questionnaire'),
       btnRemoveAll: shadowRoot.getElementById('btn-remove-all'),
       settingsPresets: shadowRoot.getElementById('settings-presets'),
+      inputSettingsRegional: shadowRoot.getElementById('settings-regional'),
       btnResetPresets: shadowRoot.getElementById('btn-reset-presets'),
       btnSaveSettings: shadowRoot.getElementById('btn-save-settings'),
       progressFill: shadowRoot.getElementById('progress-fill'),
@@ -529,15 +608,21 @@
       const parsed = elements.settingsPresets.value.split(',').map(s => parseInt(s.trim())).filter(n => !isNaN(n) && n > 0);
       if (parsed.length > 0) {
         state.presets = parsed;
+        state.isRegionalPricingEnabled = elements.inputSettingsRegional.checked;
         await saveState();
         showSection('main');
       }
     });
-    elements.btnQuick.addEventListener('click', () => startAction('create', state.presets));
-    elements.btnCustomToggle.addEventListener('click', () => elements.customInputGroup.classList.toggle('hidden'));
+    elements.btnQuick.addEventListener('click', () => startAction('create', state.presets, { isRegionalPricingEnabled: state.isRegionalPricingEnabled }));
+    elements.btnCustomToggle.addEventListener('click', () => {
+      elements.customInputGroup.classList.toggle('hidden');
+      if (!elements.customInputGroup.classList.contains('hidden')) {
+        elements.inputCustomRegional.checked = state.isRegionalPricingEnabled;
+      }
+    });
     elements.btnCreateCustom.addEventListener('click', () => {
       const val = parseInt(elements.inputAmount.value);
-      if (val > 0) startAction('create', [val]);
+      if (val > 0) startAction('create', [val], { isRegionalPricingEnabled: elements.inputCustomRegional.checked });
     });
     elements.btnQuestionnaire.addEventListener('click', () => startAction('questionnaire'));
     elements.btnRemoveAll.addEventListener('click', () => elements.confirmOverlay.classList.add('active'));
@@ -550,6 +635,7 @@
       state.isCreating = false;
       state.results = [];
       state.logs = [];
+      state.currentOptions = {};
       saveState();
       showSection('main');
     });
@@ -607,6 +693,9 @@
       elements.headerLabel.textContent = 'Settings';
       if (elements.settingsPresets) {
         elements.settingsPresets.value = state.presets.join(', ');
+      }
+      if (elements.inputSettingsRegional) {
+        elements.inputSettingsRegional.checked = state.isRegionalPricingEnabled;
       }
     }
     const target = shadowRoot.getElementById(`section-${name}`);
@@ -683,10 +772,11 @@
     return response;
   }
 
-  async function startAction(action, data = []) {
+  async function startAction(action, data = [], options = {}) {
     state.isCreating = true;
     state.currentAction = action;
     state.currentBatch = data;
+    state.currentOptions = options;
     state.currentPassId = null;
     state.progress = 0;
     state.total = data.length;
@@ -757,7 +847,7 @@
             const form = new FormData();
             form.append('name', amount.toString());
             form.append('universeId', state.targetUniverse.toString());
-            const resp = await robloxFetch('https://apis.roblox.com/game-passes/v1/game-passes', { method: 'POST', body: form });
+            const resp = await robloxFetch(`https://apis.roblox.com/game-passes/v1/universes/${state.targetUniverse}/game-passes`, { method: 'POST', body: form });
             if (!resp.ok) throw new Error(await getRobloxErrorMessage(resp));
             const data = await resp.json();
             return data.gamePassId;
@@ -768,10 +858,16 @@
         }
 
         await performWithRetry(async () => {
+          const isRegional = !!state.currentOptions?.isRegionalPricingEnabled;
           const saleForm = new FormData();
           saleForm.append('isForSale', 'true');
           saleForm.append('price', amount.toString());
-          const resp = await robloxFetch(`https://apis.roblox.com/game-passes/v1/game-passes/${passId}/details`, { method: 'POST', body: saleForm });
+          saleForm.append('isRegionalPricingEnabled', isRegional.toString());
+
+          const resp = await robloxFetch(`https://apis.roblox.com/game-passes/v1/universes/${state.targetUniverse}/game-passes/${passId}`, { 
+            method: 'PATCH',
+            body: saleForm
+          });
           if (!resp.ok) {
             const errorMsg = await getRobloxErrorMessage(resp);
             if (errorMsg.includes('on-sale limit')) {
@@ -885,7 +981,10 @@
         await performWithRetry(async () => {
           const form = new FormData();
           form.append('isForSale', 'false');
-          const resp = await robloxFetch(`https://apis.roblox.com/game-passes/v1/game-passes/${pass.id}/details`, { method: 'POST', body: form });
+          const resp = await robloxFetch(`https://apis.roblox.com/game-passes/v1/universes/${state.targetUniverse}/game-passes/${pass.id}`, { 
+            method: 'PATCH',
+            body: form 
+          });
           if (!resp.ok) throw new Error(await getRobloxErrorMessage(resp));
         }, `removal of ${pass.displayName}`);
         state.results.push({ name: pass.displayName, success: true });

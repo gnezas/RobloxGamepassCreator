@@ -51,17 +51,26 @@ Used to find the user's primary "root" experience where the gamepasses will be h
 Maps the root place ID to a Universe ID, which is required for the modern Gamepass API.
 
 ### 3. Pass Creation
-`https://apis.roblox.com/game-passes/v1/game-passes`  
+`https://apis.roblox.com/game-passes/v1/universes/{universeId}/game-passes`  
 A `POST` request that generates the gamepass object within the selected universe.
 
 ### 4. Pricing & Listing
-`https://apis.roblox.com/game-passes/v1/game-passes/{passId}/details`  
-Sets the gamepass price and toggles the "On Sale" status to `true`.
+`https://apis.roblox.com/game-passes/v1/universes/{universeId}/game-passes/{passId}`  
+A `PATCH` request that sets the gamepass price, toggles the "On Sale" status, and manages the "Regional Pricing" toggle.
 
 ### 5. Experience Questionnaire Automation
 `https://apis.roblox.com/experience-questionnaire/v1/questionnaires/{universeId}/latest`  
 `https://apis.roblox.com/experience-questionnaire/v1/responses/{universeId}/submissions`  
 Automates the mandatory experience questionnaire by fetching the latest requirements and submitting a safe "No" response for all content categories.
+
+---
+
+## ✨ Features
+- **Bulk Creation:** Create multiple gamepasses from custom presets in one click.
+- **Custom Amount:** Toggle regional pricing per batch.
+- **Regional Pricing Toggle:** Globally manage regional pricing defaults in settings.
+- **Automatic Off-Sale:** Wipe all passes in an experience instantly.
+- **Questionnaire Automation:** Automatically handle mandatory Roblox experience questionnaires.
 
 ---
 
