@@ -82,6 +82,7 @@
     const themeObserver = new MutationObserver(() => syncTheme());
     themeObserver.observe(document.body, { attributes: true, attributeFilter: ['class'] });
 
+    if (state.isOpen) applyWidgetState();
     if (state.isCreating) resumeAction();
     updateUI();
     if (state.userId) refreshQuestionnaireStatus();
@@ -138,7 +139,7 @@
       chrome.storage.local.get(['gamepassCreatorState'], (result) => {
         if (result.gamepassCreatorState) {
           const saved = result.gamepassCreatorState;
-          state = { ...state, ...saved, isOpen: false };
+          state = { ...state, ...saved };
           if (!state.presets || state.presets.length === 0) {
             state.presets = [...DEFAULT_VALUES];
           }
@@ -571,8 +572,7 @@
     });
   }
 
-  function toggleWidget() {
-    state.isOpen = !state.isOpen;
+  function applyWidgetState() {
     if (state.isOpen) {
       elements.widget.style.left = '50%';
       elements.widget.style.top = '50%';
@@ -582,6 +582,12 @@
     } else {
       elements.widget.classList.remove('open');
     }
+  }
+
+  async function toggleWidget() {
+    state.isOpen = !state.isOpen;
+    applyWidgetState();
+    await saveState();
   }
 
   function showSection(name) {
