@@ -21,6 +21,7 @@
     isOpen: false,
     targetUniverse: null,
     currentBatch: [],
+    currentPassId: null,
     presets: [...DEFAULT_VALUES],
     maxRetries: 2
   };
@@ -39,16 +40,86 @@
     check: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg>',
     x: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>',
     chevronLeft: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 18 9 12 15 6"></polyline></svg>',
-    coffee: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 8h1a4 4 0 0 1 0 8h-1"></path><path d="M2 8h16v9a4 4 0 0 1-4 4H6a4 4 0 0 1-4-4V8z"></path><line x1="6" y1="1" x2="6" y2="4"></line><line x1="10" y1="1" x2="10" y2="4"></line><line x1="14" y1="1" x2="14" y2="4"></line></svg>'
+    coffee: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 8h1a4 4 0 0 1 0 8h-1"></path><path d="M2 8h16v9a4 4 0 0 1-4 4H6a4 4 0 0 1-4-4V8z"></path><line x1="6" y1="1" x2="6" y2="4"></line><line x1="10" y1="1" x2="10" y2="4"></line><line x1="14" y1="1" x2="14" y2="4"></line></svg>',
+    clipboard: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"></path><rect x="8" y="2" width="8" height="4" rx="1" ry="1"></rect></svg>'
   };
+
+  function syncTheme() {
+    // Roblox uses 'dark-theme' class on body for dark mode.
+    // If it's missing, it's usually light mode (or has 'light-theme' explicitly).
+    const isDark = document.body.classList.contains('dark-theme');
+    const isLight = !isDark || document.body.classList.contains('light-theme');
+    
+    if (host) {
+      if (isLight) host.classList.add('light-mode');
+      else host.classList.remove('light-mode');
+    }
+    
+    const navItem = document.getElementById('rbx-gamepass-creator-nav-item');
+    if (navItem) {
+      const btn = navItem.querySelector('button');
+      if (btn) {
+        if (isLight) {
+          btn.style.background = 'rgba(0,0,0,0.06)';
+          btn.style.color = '#000';
+          btn.style.borderColor = 'rgba(0,0,0,0.1)';
+        } else {
+          btn.style.background = 'rgba(255,255,255,0.08)';
+          btn.style.color = '#fff';
+          btn.style.borderColor = 'rgba(255,255,255,0.1)';
+        }
+      }
+    }
+  }
 
   async function init() {
     extractUserData();
     await loadState();
     createUI();
     injectNavbarButton();
+    syncTheme();
+    
+    const themeObserver = new MutationObserver(() => syncTheme());
+    themeObserver.observe(document.body, { attributes: true, attributeFilter: ['class'] });
+
     if (state.isCreating) resumeAction();
     updateUI();
+    if (state.userId) refreshQuestionnaireStatus();
+  }
+
+  async function refreshQuestionnaireStatus() {
+    try {
+      await ensureUniverseLinked();
+      const resp = await robloxFetch(`https://apis.roblox.com/experience-questionnaire/v1/responses/${state.targetUniverse}/submissions/latest`);
+      const btn = elements.btnQuestionnaire;
+      if (!btn) return;
+      
+      if (resp.status === 404) {
+        btn.querySelector('.status-dot').style.background = '#ff5555';
+        btn.querySelector('.btn-text').textContent = 'Submit Questionnaire (Required)';
+      } else if (resp.ok) {
+        btn.querySelector('.status-dot').style.background = '#55ff55';
+        btn.querySelector('.btn-text').textContent = 'Redo Questionnaire';
+      }
+    } catch (e) {}
+  }
+
+  async function ensureUniverseLinked() {
+    if (state.targetUniverse) return state.targetUniverse;
+    
+    addLog('Connecting to API...', 'info');
+    const gamesResp = await robloxFetch(`https://games.roblox.com/v2/users/${state.userId}/games?sortOrder=Asc&limit=10`);
+    if (!gamesResp.ok) throw new Error(await getRobloxErrorMessage(gamesResp));
+    const games = await gamesResp.json();
+    if (!games.data || games.data.length === 0) throw new Error('No games found');
+    const game = games.data[0];
+    const univResp = await robloxFetch(`https://apis.roblox.com/universes/v1/places/${game.rootPlace.id}/universe`);
+    if (!univResp.ok) throw new Error(await getRobloxErrorMessage(univResp));
+    const univData = await univResp.json();
+    state.targetUniverse = univData.universeId;
+    addLog(`Linked to: ${game.name}`, 'success');
+    await saveState();
+    return state.targetUniverse;
   }
 
   function extractUserData() {
@@ -93,8 +164,15 @@
     const navItem = document.createElement('li');
     navItem.id = 'rbx-gamepass-creator-nav-item';
     navItem.className = 'navbar-icon-item';
+    
+    const isDark = document.body.classList.contains('dark-theme');
+    const isLight = !isDark || document.body.classList.contains('light-theme');
+    const bg = isLight ? 'rgba(0,0,0,0.06)' : 'rgba(255,255,255,0.08)';
+    const color = isLight ? '#000' : '#fff';
+    const border = isLight ? 'rgba(0,0,0,0.1)' : 'rgba(255,255,255,0.1)';
+
     navItem.innerHTML = `
-      <button type="button" class="rbx-menu-item" style="background:rgba(255,255,255,0.08); color:#fff; border-radius:6px; padding:0 12px; height:28px; margin:6px 4px 6px 4px; border:1px solid rgba(255,255,255,0.1); font-weight:600; font-size:12px; cursor:pointer; font-family:inherit; transition: 0.2s; display: flex; align-items: center; justify-content: center;">
+      <button type="button" class="rbx-menu-item" style="background:${bg}; color:${color}; border-radius:6px; padding:0 12px; height:28px; margin:6px 4px 6px 4px; border:1px solid ${border}; font-weight:600; font-size:12px; cursor:pointer; font-family:inherit; transition: 0.2s; display: flex; align-items: center; justify-content: center;">
         Create Passes
       </button>
     `;
@@ -107,8 +185,16 @@
     }
 
     const btn = navItem.querySelector('button');
-    btn.addEventListener('mouseenter', () => btn.style.background = 'rgba(255,255,255,0.12)');
-    btn.addEventListener('mouseleave', () => btn.style.background = 'rgba(255,255,255,0.08)');
+    btn.addEventListener('mouseenter', () => {
+      const currentDark = document.body.classList.contains('dark-theme');
+      const currentLight = !currentDark || document.body.classList.contains('light-theme');
+      btn.style.background = currentLight ? 'rgba(0,0,0,0.1)' : 'rgba(255,255,255,0.12)';
+    });
+    btn.addEventListener('mouseleave', () => {
+      const currentDark = document.body.classList.contains('dark-theme');
+      const currentLight = !currentDark || document.body.classList.contains('light-theme');
+      btn.style.background = currentLight ? 'rgba(0,0,0,0.06)' : 'rgba(255,255,255,0.08)';
+    });
     btn.addEventListener('click', toggleWidget);
   }
 
@@ -123,14 +209,20 @@
       :host {
         --bg: rgba(13, 13, 13, 0.9);
         --bg-elevated: rgba(255, 255, 255, 0.04);
-        --bg-hover: rgba(255, 255, 255, 0.08);
+        --bg-hover: rgba(255, 255, 255, 0.12);
         --border: rgba(255, 255, 255, 0.08);
-        --border-strong: rgba(255, 255, 255, 0.15);
+        --border-strong: rgba(255, 255, 255, 0.2);
         --text: #ffffff;
         --text-dim: #888888;
         --accent: #ffffff;
         --radius: 12px;
         --blur: 24px;
+        --input-bg: rgba(0, 0, 0, 0.2);
+        --input-focus: rgba(0, 0, 0, 0.3);
+        --btn-primary-bg: #ffffff;
+        --btn-primary-text: #000000;
+        --scrollbar-thumb: rgba(255, 255, 255, 0.1);
+        --overlay-bg: rgba(0, 0, 0, 0.6);
         font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
         z-index: 9999999;
         position: fixed;
@@ -139,6 +231,23 @@
         width: 100%;
         height: 100%;
         pointer-events: none;
+      }
+
+      :host(.light-mode) {
+        --bg: rgba(245, 245, 245, 0.95);
+        --bg-elevated: rgba(0, 0, 0, 0.04);
+        --bg-hover: rgba(0, 0, 0, 0.08);
+        --border: rgba(0, 0, 0, 0.1);
+        --border-strong: rgba(0, 0, 0, 0.2);
+        --text: #000000;
+        --text-dim: #666666;
+        --accent: #000000;
+        --input-bg: rgba(0, 0, 0, 0.05);
+        --input-focus: rgba(0, 0, 0, 0.08);
+        --btn-primary-bg: #000000;
+        --btn-primary-text: #ffffff;
+        --scrollbar-thumb: rgba(0, 0, 0, 0.2);
+        --overlay-bg: rgba(255, 255, 255, 0.6);
       }
 
       .widget {
@@ -161,6 +270,10 @@
         color: var(--text);
       }
 
+      :host(.light-mode) .widget {
+        box-shadow: 0 30px 60px rgba(0, 0, 0, 0.15);
+      }
+
       .widget.open { opacity: 1; transform: translate(-50%, -50%) scale(1); pointer-events: all; }
 
       .header { 
@@ -172,6 +285,7 @@
         border-bottom: 1px solid var(--border);
         background: rgba(255,255,255,0.02);
       }
+      :host(.light-mode) .header { background: rgba(0,0,0,0.02); }
       .header:active { cursor: grabbing; }
       .header h2 { margin: 0; font-size: 11px; font-weight: 700; letter-spacing: 0.05em; color: var(--text-dim); text-transform: uppercase; }
 
@@ -220,8 +334,9 @@
       .btn:disabled { opacity: 0.4; cursor: not-allowed; }
       .btn svg { width: 14px; height: 14px; opacity: 0.7; }
       
-      .btn-primary { background: #fff; color: #000; border: none; justify-content: center; }
-      .btn-primary:hover { background: #eeeeee; }
+      .btn-primary { background: var(--btn-primary-bg); color: var(--btn-primary-text); border: none; justify-content: center; }
+      .btn-primary:hover { filter: brightness(0.9); }
+      :host(.light-mode) .btn-primary:hover { filter: brightness(1.05); }
 
       .input-group { display: flex; flex-direction: column; gap: 8px; margin-top: 4px; border-top: 1px solid var(--border); padding-top: 12px; }
       input, textarea {
@@ -229,23 +344,23 @@
         padding: 10px 12px;
         border-radius: 8px;
         border: 1px solid var(--border);
-        background: rgba(0,0,0,0.2);
-        color: white;
+        background: var(--input-bg);
+        color: var(--text);
         box-sizing: border-box;
         font-family: inherit;
         font-size: 13px;
         transition: 0.15s;
       }
       textarea { min-height: 80px; resize: none; font-size: 12px; line-height: 1.5; color: var(--text-dim); }
-      input:focus, textarea:focus { outline: none; border-color: var(--border-strong); background: rgba(0,0,0,0.3); }
+      input:focus, textarea:focus { outline: none; border-color: var(--border-strong); background: var(--input-focus); }
 
       .progress-container { text-align: center; }
-      .progress-bar { height: 3px; background: rgba(255,255,255,0.06); border-radius: 2px; overflow: hidden; margin: 16px 0 8px; }
-      .progress-fill { height: 100%; background: #fff; width: 0%; transition: width 0.3s ease; }
+      .progress-bar { height: 3px; background: var(--bg-elevated); border-radius: 2px; overflow: hidden; margin: 16px 0 8px; }
+      .progress-fill { height: 100%; background: var(--text); width: 0%; transition: width 0.3s ease; }
       .stats { display: flex; justify-content: space-between; font-size: 10px; font-weight: 700; color: var(--text-dim); text-transform: uppercase; }
 
       .log {
-        background: rgba(0,0,0,0.2);
+        background: var(--input-bg);
         border-radius: 8px;
         padding: 12px;
         height: 160px;
@@ -262,20 +377,24 @@
       .log-error { color: #ff5555; }
       .log-entry svg { width: 12px; height: 12px; flex-shrink: 0; margin-top: 2px; }
 
-      .results-list { margin: 16px 0; border-radius: 8px; border: 1px solid var(--border); height: 200px; overflow-y: auto; background: rgba(0,0,0,0.1); }
+      .results-list { margin: 16px 0; border-radius: 8px; border: 1px solid var(--border); height: 200px; overflow-y: auto; background: var(--input-bg); }
       .result-item { display: flex; flex-direction: column; gap: 2px; padding: 10px 14px; border-bottom: 1px solid var(--border); font-size: 12px; text-align: left; }
       .result-item:last-child { border-bottom: none; }
       .result-row { display: flex; justify-content: space-between; font-weight: 500; }
       .result-error-detail { font-size: 10px; color: #ff5555; opacity: 0.8; }
 
-      .overlay { position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.6); backdrop-filter: blur(8px); display: flex; align-items: center; justify-content: center; z-index: 2000; opacity: 0; pointer-events: none; transition: 0.3s; }
+      .overlay { position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: var(--overlay-bg); backdrop-filter: blur(8px); display: flex; align-items: center; justify-content: center; z-index: 2000; opacity: 0; pointer-events: none; transition: 0.3s; }
       .overlay.active { opacity: 1; pointer-events: all; }
       .confirm-modal { background: var(--bg); border: 1px solid var(--border); padding: 28px; border-radius: 16px; max-width: 300px; text-align: center; }
       .confirm-modal h3 { margin: 0 0 8px; font-size: 16px; }
       .confirm-modal p { color: var(--text-dim); font-size: 13px; margin: 0 0 24px; line-height: 1.5; }
       
       ::-webkit-scrollbar { width: 4px; }
-      ::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.1); border-radius: 2px; }
+      ::-webkit-scrollbar-thumb { background: var(--scrollbar-thumb); border-radius: 2px; }
+
+      .footer { margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--border); text-align: center; font-size: 11px; color: var(--text-dim); }
+      .footer a { color: var(--text-dim); text-decoration: none; font-weight: 500; transition: color 0.2s; }
+      .footer a:hover { color: var(--text); }
     `;
     shadowRoot.appendChild(style);
 
@@ -305,6 +424,14 @@
                 <button id="btn-create-custom" class="btn btn-primary">Start creation</button>
               </div>
 
+              <button id="btn-questionnaire" class="btn">
+                <div style="display:flex; align-items:center; gap:10px; flex:1">
+                  ${ICONS.clipboard} 
+                  <span class="btn-text">Check Questionnaire</span>
+                </div>
+                <div class="status-dot" style="width:8px; height:8px; border-radius:50%; background:var(--border-strong)"></div>
+              </button>
+
               <button id="btn-remove-all" class="btn" style="margin-top:4px; color:#ff5555; border-color:rgba(255,85,85,0.15)">${ICONS.trash} Wipe all passes</button>
             </div>
           </div>
@@ -315,6 +442,9 @@
               <textarea id="settings-presets" placeholder="2, 5, 10, 25..."></textarea>
             </div>
             <button id="btn-save-settings" class="btn btn-primary">Save changes</button>
+            <div style="margin-top:12px; font-size:10px; color:var(--text-dim); text-align:center">
+              Version ${chrome.runtime.getManifest().version}
+            </div>
           </div>
 
           <div id="section-progress" class="section hidden">
@@ -331,6 +461,10 @@
           <div id="section-results" class="section hidden">
             <div id="results-list" class="results-list"></div>
             <button id="btn-done" class="btn btn-primary">${ICONS.check} Finish batch</button>
+          </div>
+
+          <div class="footer">
+            Powered by <a href="https://rbxdonate.com" target="_blank">RBXDonate</a>
           </div>
         </div>
       </div>
@@ -364,6 +498,7 @@
       customInputGroup: shadowRoot.getElementById('custom-input-group'),
       inputAmount: shadowRoot.getElementById('input-amount'),
       btnCreateCustom: shadowRoot.getElementById('btn-create-custom'),
+      btnQuestionnaire: shadowRoot.getElementById('btn-questionnaire'),
       btnRemoveAll: shadowRoot.getElementById('btn-remove-all'),
       settingsPresets: shadowRoot.getElementById('settings-presets'),
       btnSaveSettings: shadowRoot.getElementById('btn-save-settings'),
@@ -398,6 +533,7 @@
       const val = parseInt(elements.inputAmount.value);
       if (val > 0) startAction('create', [val]);
     });
+    elements.btnQuestionnaire.addEventListener('click', () => startAction('questionnaire'));
     elements.btnRemoveAll.addEventListener('click', () => elements.confirmOverlay.classList.add('active'));
     elements.confirmCancel.addEventListener('click', () => elements.confirmOverlay.classList.remove('active'));
     elements.confirmYes.addEventListener('click', () => {
@@ -442,6 +578,7 @@
       elements.widget.style.top = '50%';
       elements.widget.style.transform = 'translate(-50%, -50%) scale(1)';
       elements.widget.classList.add('open');
+      refreshQuestionnaireStatus();
     } else {
       elements.widget.classList.remove('open');
     }
@@ -475,7 +612,7 @@
         <div class="result-item">
           <div class="result-row">
             <span>${r.name}</span>
-            <span style="color:${r.success ? '#fff' : '#ff5555'}; display:flex; align-items:center; gap:4px">
+            <span style="color:${r.success ? 'var(--text)' : '#ff5555'}; display:flex; align-items:center; gap:4px">
               ${r.success ? ICONS.check : ICONS.x} ${r.success ? 'Success' : 'Failed'}
             </span>
           </div>
@@ -534,6 +671,7 @@
     state.isCreating = true;
     state.currentAction = action;
     state.currentBatch = data;
+    state.currentPassId = null;
     state.progress = 0;
     state.total = data.length;
     state.results = [];
@@ -567,6 +705,7 @@
         await saveState();
       }
       if (state.currentAction === 'create') await createLoop();
+      else if (state.currentAction === 'questionnaire') await questionnaireLoop();
       else await removeLoop();
     } catch (err) {
       addLog(err.message, 'error');
@@ -595,15 +734,22 @@
     for (let i = state.progress; i < items.length; i++) {
       const amount = items[i];
       try {
-        const passId = await performWithRetry(async () => {
-          const form = new FormData();
-          form.append('name', amount.toString());
-          form.append('universeId', state.targetUniverse.toString());
-          const resp = await robloxFetch('https://apis.roblox.com/game-passes/v1/game-passes', { method: 'POST', body: form });
-          if (!resp.ok) throw new Error(await getRobloxErrorMessage(resp));
-          const data = await resp.json();
-          return data.gamePassId;
-        }, `${amount} R$ creation`);
+        let passId = state.currentPassId;
+
+        if (!passId) {
+          passId = await performWithRetry(async () => {
+            const form = new FormData();
+            form.append('name', amount.toString());
+            form.append('universeId', state.targetUniverse.toString());
+            const resp = await robloxFetch('https://apis.roblox.com/game-passes/v1/game-passes', { method: 'POST', body: form });
+            if (!resp.ok) throw new Error(await getRobloxErrorMessage(resp));
+            const data = await resp.json();
+            return data.gamePassId;
+          }, `${amount} R$ creation`);
+
+          state.currentPassId = passId;
+          await saveState();
+        }
 
         await performWithRetry(async () => {
           const saleForm = new FormData();
@@ -623,21 +769,86 @@
 
         state.results.push({ name: `${amount} R$`, success: true });
         addLog(`Created ${amount} R$`, 'success');
+        state.currentPassId = null;
       } catch (err) {
         if (err.message === 'LIMIT_REACHED') {
           addLog('CRITICAL: Gamepass limit reached (50/50). Stopping task.', 'error');
           addLog('Tip: Use "Wipe all passes" to clear space.', 'info');
           state.results.push({ name: `${amount} R$`, success: false, error: 'Roblox limit reached (50 passes)' });
+          state.currentPassId = null;
           break; // Stop the entire loop
         }
         addLog(`${amount} R$ failed: ${err.message}`, 'error');
         state.results.push({ name: `${amount} R$`, success: false, error: err.message });
+        state.currentPassId = null;
       }
       state.progress = i + 1;
       await saveState();
       updateUI();
       await new Promise(r => setTimeout(r, 400));
     }
+    state.isCreating = false;
+    await saveState();
+    updateUI();
+  }
+
+  async function questionnaireLoop() {
+    state.total = 1;
+    state.progress = 0;
+    updateUI();
+    
+    try {
+      addLog('Fetching questionnaire ID...', 'info');
+      const qResp = await robloxFetch(`https://apis.roblox.com/experience-questionnaire/v1/questionnaires/${state.targetUniverse}/latest`);
+      if (!qResp.ok) throw new Error(await getRobloxErrorMessage(qResp));
+      const qData = await qResp.json();
+      const questionnaireId = qData.questionnaireId;
+      addLog('Questionnaire ID retrieved', 'success');
+
+      addLog('Fetching questionnaire structure...', 'info');
+      const detailsResp = await robloxFetch(`https://apis.roblox.com/experience-questionnaire/v1/questionnaires/${questionnaireId}?localeCode=en_us`);
+      if (!detailsResp.ok) throw new Error(await getRobloxErrorMessage(detailsResp));
+      const detailsData = await detailsResp.json();
+      
+      const answers = [];
+      const questionnaire = detailsData.questionnaire;
+      if (questionnaire && questionnaire.sections) {
+        questionnaire.sections.forEach(section => {
+          if (section.questions) {
+            section.questions.forEach(question => {
+              const noOption = question.options.find(opt => opt.text.trim().toLowerCase() === 'no');
+              if (noOption) {
+                answers.push({
+                  questionId: question.id,
+                  value: JSON.stringify(noOption.id)
+                });
+              }
+            });
+          }
+        });
+      }
+
+      if (answers.length === 0) throw new Error('Could not find any "No" options in the questionnaire');
+      addLog(`Found ${answers.length} questions to answer "No"`, 'info');
+
+      addLog('Submitting responses...', 'info');
+      const sResp = await robloxFetch(`https://apis.roblox.com/experience-questionnaire/v1/responses/${state.targetUniverse}/submissions`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ questionnaireId, response: { answers } })
+      });
+
+      if (!sResp.ok) throw new Error(await getRobloxErrorMessage(sResp));
+      
+      addLog('Questionnaire submitted successfully!', 'success');
+      state.results.push({ name: 'Experience Questionnaire', success: true });
+      state.progress = 1;
+      refreshQuestionnaireStatus();
+    } catch (err) {
+      addLog(`Questionnaire failed: ${err.message}`, 'error');
+      state.results.push({ name: 'Experience Questionnaire', success: false, error: err.message });
+    }
+    
     state.isCreating = false;
     await saveState();
     updateUI();

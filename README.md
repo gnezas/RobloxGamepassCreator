@@ -58,6 +58,11 @@ A `POST` request that generates the gamepass object within the selected universe
 `https://apis.roblox.com/game-passes/v1/game-passes/{passId}/details`  
 Sets the gamepass price and toggles the "On Sale" status to `true`.
 
+### 5. Experience Questionnaire Automation
+`https://apis.roblox.com/experience-questionnaire/v1/questionnaires/{universeId}/latest`  
+`https://apis.roblox.com/experience-questionnaire/v1/responses/{universeId}/submissions`  
+Automates the mandatory experience questionnaire by fetching the latest requirements and submitting a safe "No" response for all content categories.
+
 ---
 
 ## 📁 Project Structure
@@ -69,6 +74,7 @@ Sets the gamepass price and toggles the "On Sale" status to `true`.
 │   └── content.js         # Main logic and UI injection
 ├── icons/                 # Extension icons (16, 32, 48, 128)
 ├── manifest.json          # Extension configuration (MV3)
+├── questionnaire-requests-example.txt # Questionnaire example
 └── README.md              # Documentation
 ```
 
