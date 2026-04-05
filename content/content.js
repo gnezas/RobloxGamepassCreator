@@ -74,7 +74,7 @@
 
   async function init() {
     const host = window.location.hostname;
-    if (host !== 'www.roblox.com' && host !== 'web.roblox.com') return;
+    if (host !== 'www.roblox.com') return;
 
     extractUserData();
     await loadState();
