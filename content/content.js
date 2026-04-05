@@ -16,6 +16,7 @@
     results: [],
     logs: [],
     isOpen: false,
+    currentSection: 'main',
     targetUniverse: null,
     currentBatch: [],
     currentPassId: null,
@@ -80,6 +81,7 @@
     themeObserver.observe(document.body, { attributes: true, attributeFilter: ['class'] });
 
     if (state.isOpen) applyWidgetState();
+    if (state.currentSection) showSection(state.currentSection);
     if (state.isCreating) resumeAction();
     updateUI();
     if (state.userId) refreshQuestionnaireStatus();
@@ -436,7 +438,10 @@
 
           <div id="section-settings" class="section hidden">
             <div style="display:flex; flex-direction:column; gap:4px">
-              <span style="font-size:10px; font-weight:700; color:var(--text-dim); text-transform:uppercase">Pass presets</span>
+              <div style="display:flex; justify-content:space-between; align-items:center">
+                <span style="font-size:10px; font-weight:700; color:var(--text-dim); text-transform:uppercase">Pass presets</span>
+                <button id="btn-reset-presets" style="background:none; border:none; padding:0; font-size:10px; color:var(--text-dim); cursor:pointer; text-decoration:underline">Reset to defaults</button>
+              </div>
               <textarea id="settings-presets" placeholder="2, 5, 10, 25..."></textarea>
             </div>
             <button id="btn-save-settings" class="btn btn-primary">Save changes</button>
@@ -499,6 +504,7 @@
       btnQuestionnaire: shadowRoot.getElementById('btn-questionnaire'),
       btnRemoveAll: shadowRoot.getElementById('btn-remove-all'),
       settingsPresets: shadowRoot.getElementById('settings-presets'),
+      btnResetPresets: shadowRoot.getElementById('btn-reset-presets'),
       btnSaveSettings: shadowRoot.getElementById('btn-save-settings'),
       progressFill: shadowRoot.getElementById('progress-fill'),
       progressText: shadowRoot.getElementById('progress-text'),
@@ -514,8 +520,10 @@
     elements.btnClose.addEventListener('click', toggleWidget);
     elements.btnBack.addEventListener('click', () => showSection('main'));
     elements.btnSettingsToggle.addEventListener('click', () => {
-      elements.settingsPresets.value = state.presets.join(', ');
       showSection('settings');
+    });
+    elements.btnResetPresets.addEventListener('click', () => {
+      elements.settingsPresets.value = DEFAULT_VALUES.join(', ');
     });
     elements.btnSaveSettings.addEventListener('click', async () => {
       const parsed = elements.settingsPresets.value.split(',').map(s => parseInt(s.trim())).filter(n => !isNaN(n) && n > 0);
@@ -586,7 +594,8 @@
     await saveState();
   }
 
-  function showSection(name) {
+  async function showSection(name) {
+    state.currentSection = name;
     elements.sectionMain.classList.add('hidden');
     elements.sectionSettings.classList.add('hidden');
     elements.sectionProgress.classList.add('hidden');
@@ -596,8 +605,13 @@
     if (name === 'settings') {
       elements.btnBack.classList.remove('hidden');
       elements.headerLabel.textContent = 'Settings';
+      if (elements.settingsPresets) {
+        elements.settingsPresets.value = state.presets.join(', ');
+      }
     }
-    shadowRoot.getElementById(`section-${name}`).classList.remove('hidden');
+    const target = shadowRoot.getElementById(`section-${name}`);
+    if (target) target.classList.remove('hidden');
+    await saveState();
   }
 
   function updateUI() {
@@ -622,7 +636,7 @@
         </div>
       `).join('');
     } else {
-      showSection('main');
+      showSection(state.currentSection || 'main');
     }
   }
 
