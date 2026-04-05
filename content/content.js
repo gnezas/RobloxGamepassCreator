@@ -23,6 +23,7 @@
     currentPassId: null,
     presets: [...DEFAULT_VALUES],
     isRegionalPricingEnabled: false,
+    windowPosition: null,
     maxRetries: 2
   };
 
@@ -657,19 +658,29 @@
       elements.widget.style.top = `${e.clientY - dragOffset.y}px`;
       elements.widget.style.transform = 'none';
     });
-    document.addEventListener('mouseup', () => {
+    document.addEventListener('mouseup', async () => {
       if (isDragging) {
         isDragging = false;
         elements.widget.style.transition = 'opacity 0.3s cubic-bezier(0.16, 1, 0.3, 1), transform 0.4s cubic-bezier(0.16, 1, 0.3, 1)';
+        
+        const rect = elements.widget.getBoundingClientRect();
+        state.windowPosition = { x: rect.left, y: rect.top };
+        await saveState();
       }
     });
   }
 
   function applyWidgetState() {
     if (state.isOpen) {
-      elements.widget.style.left = '50%';
-      elements.widget.style.top = '50%';
-      elements.widget.style.transform = 'translate(-50%, -50%) scale(1)';
+      if (state.windowPosition) {
+        elements.widget.style.left = `${state.windowPosition.x}px`;
+        elements.widget.style.top = `${state.windowPosition.y}px`;
+        elements.widget.style.transform = 'scale(1)';
+      } else {
+        elements.widget.style.left = '50%';
+        elements.widget.style.top = '50%';
+        elements.widget.style.transform = 'translate(-50%, -50%) scale(1)';
+      }
       elements.widget.classList.add('open');
       refreshQuestionnaireStatus();
     } else {
