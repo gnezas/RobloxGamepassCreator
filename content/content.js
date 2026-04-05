@@ -517,7 +517,7 @@
             </div>
 
             <div class="toggle-group">
-              <span class="toggle-label">Regional Pricing (Default)</span>
+              <span class="toggle-label">Regional Pricing</span>
               <label class="switch">
                 <input type="checkbox" id="settings-regional">
                 <span class="slider"></span>
