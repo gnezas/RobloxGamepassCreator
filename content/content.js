@@ -24,6 +24,7 @@
     presets: [...DEFAULT_VALUES],
     isRegionalPricingEnabled: false,
     windowPosition: null,
+    questionnaireCache: null, // { questionnaireId: string, status: 'completed'|'missing' }
     maxRetries: 2
   };
 
@@ -96,17 +97,37 @@
   async function refreshQuestionnaireStatus() {
     try {
       await ensureUniverseLinked();
-      const resp = await robloxFetch(`https://apis.roblox.com/experience-questionnaire/v1/responses/${state.targetUniverse}/submissions/latest`);
       const btn = elements.btnQuestionnaire;
       if (!btn) return;
+
+      // Fetch latest questionnaire ID
+      const qResp = await robloxFetch(`https://apis.roblox.com/experience-questionnaire/v1/questionnaires/${state.targetUniverse}/latest`);
+      if (!qResp.ok) return;
+      const qData = await qResp.json();
+      const currentQuestionnaireId = qData.questionnaireId;
+
+      // If already cached as 'completed' for this ID, skip the submission check
+      if (state.questionnaireCache && 
+          state.questionnaireCache.questionnaireId === currentQuestionnaireId && 
+          state.questionnaireCache.status === 'completed') {
+        btn.querySelector('.status-dot').style.background = '#55ff55';
+        btn.querySelector('.btn-text').textContent = 'Redo Questionnaire';
+        return;
+      }
+
+      // Check submission status
+      const resp = await robloxFetch(`https://apis.roblox.com/experience-questionnaire/v1/responses/${state.targetUniverse}/submissions/latest`);
       
       if (resp.status === 404) {
         btn.querySelector('.status-dot').style.background = '#ff5555';
         btn.querySelector('.btn-text').textContent = 'Submit Questionnaire (Required)';
+        state.questionnaireCache = { questionnaireId: currentQuestionnaireId, status: 'missing' };
       } else if (resp.ok) {
         btn.querySelector('.status-dot').style.background = '#55ff55';
         btn.querySelector('.btn-text').textContent = 'Redo Questionnaire';
+        state.questionnaireCache = { questionnaireId: currentQuestionnaireId, status: 'completed' };
       }
+      await saveState();
     } catch (e) {}
   }
 
