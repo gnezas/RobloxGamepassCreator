@@ -73,8 +73,8 @@
   }
 
   async function init() {
-    const host = window.location.hostname;
-    if (host !== 'www.roblox.com') return;
+    const hostName = window.location.hostname;
+    if (hostName !== 'www.roblox.com') return;
 
     extractUserData();
     await loadState();
@@ -1006,9 +1006,24 @@
     updateUI();
   }
 
-  init();
+  function waitForBody() {
+    if (document.body) {
+      init();
+    } else {
+      const bodyObserver = new MutationObserver((mutations, observer) => {
+        if (document.body) {
+          observer.disconnect();
+          init();
+        }
+      });
+      bodyObserver.observe(document.documentElement, { childList: true });
+    }
+  }
+
+  waitForBody();
+  
   const observer = new MutationObserver(() => {
-    if (!document.getElementById('rbx-gamepass-creator-nav-item')) injectNavbarButton();
+    if (document.body && !document.getElementById('rbx-gamepass-creator-nav-item')) injectNavbarButton();
   });
-  observer.observe(document.body, { childList: true, subtree: true });
+  observer.observe(document.documentElement, { childList: true, subtree: true });
 })();
