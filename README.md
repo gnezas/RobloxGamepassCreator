@@ -33,8 +33,7 @@ If you prefer to run the extension from the source code or contribute to develop
 ### Permissions & Security
 This extension follows the principle of least privilege, using only what is necessary:
 - `storage`: To save your custom price presets and progress during automation.
-- `activeTab`: To securely access the CSRF token and User ID from the current page session.
-- `host_permissions`: Specifically limited to `*.roblox.com` to communicate with official API endpoints.
+- `host_permissions`: Specifically limited to `www.roblox.com`, `games.roblox.com`, and `apis.roblox.com` to communicate with official API endpoints.
 
 ---
 
