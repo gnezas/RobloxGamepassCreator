@@ -27,7 +27,6 @@ If you prefer to run the extension from the source code or contribute to develop
 
 ### Core Components
 - **Content Script (`content/content.js`):** The engine of the extension. It injects a "Create Passes" button into the Roblox navbar and renders a custom UI using a **Shadow DOM** to ensure styles don't conflict with Roblox's native CSS.
-- **Service Worker (`background/background.js`):** Handles background lifecycle events and ensures the extension remains responsive.
 - **Shadow UI:** A modern, draggable interface built with vanilla JavaScript and CSS variables for a sleek, dark-themed aesthetic.
 
 ### Permissions & Security
@@ -76,8 +75,6 @@ Automates the mandatory experience questionnaire by fetching the latest requirem
 ## 📁 Project Structure
 
 ```text
-├── background/
-│   └── background.js      # Background service worker
 ├── content/
 │   └── content.js         # Main logic and UI injection
 ├── icons/                 # Extension icons (16, 32, 48, 128)
